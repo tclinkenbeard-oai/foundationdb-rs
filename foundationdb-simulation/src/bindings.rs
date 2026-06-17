@@ -26,8 +26,12 @@ use raw_bindings::{
 // String conversions
 
 #[doc(hidden)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn str_from_c(c_buf: *const i8) -> String {
+///
+/// # Safety
+///
+/// `c_buf` must be non-null and point to a valid NUL-terminated C string for
+/// the duration of this call.
+pub unsafe fn str_from_c(c_buf: *const i8) -> String {
     let c_str = unsafe { ffi::CStr::from_ptr(c_buf) };
     c_str.to_str().unwrap().to_string()
 }
@@ -105,7 +109,13 @@ pub enum Severity {
 
 impl WorkloadContext {
     #[doc(hidden)]
-    pub fn new(raw: FDBWorkloadContext) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// `raw` must originate from the FoundationDB simulator and its inner
+    /// pointer and callback table must remain valid for the lifetime of the
+    /// returned context.
+    pub unsafe fn new(raw: FDBWorkloadContext) -> Self {
         Self(raw)
     }
 
@@ -177,7 +187,7 @@ impl WorkloadContext {
         let raw_value = unsafe {
             self.0.getOption.unwrap_unchecked()(self.0.inner, name.as_ptr(), default_value.as_ptr())
         };
-        let value = str_from_c(raw_value.inner);
+        let value = unsafe { str_from_c(raw_value.inner) };
         unsafe { raw_value.free.unwrap_unchecked()(raw_value.inner) };
         if value == null {
             None

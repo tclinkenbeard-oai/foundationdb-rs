@@ -219,8 +219,10 @@ macro_rules! register_factory {
                     .set($crate::internals::poll_pending_tasks)
                     .unwrap();
             }
-            let name = $crate::internals::str_from_c(raw_name);
-            let context = $crate::WorkloadContext::new(raw_context);
+            // SAFETY: FoundationDB invokes this factory with a valid C string and
+            // workload context whose callbacks remain valid for the workload.
+            let name = unsafe { $crate::internals::str_from_c(raw_name) };
+            let context = unsafe { $crate::WorkloadContext::new(raw_context) };
             <$name as $crate::RustWorkloadFactory>::create(name, context)
         }
         #[no_mangle]
@@ -255,8 +257,10 @@ macro_rules! register_workload {
                     .set($crate::internals::poll_pending_tasks)
                     .unwrap();
             }
-            let name = $crate::internals::str_from_c(raw_name);
-            let context = $crate::WorkloadContext::new(raw_context);
+            // SAFETY: FoundationDB invokes this factory with a valid C string and
+            // workload context whose callbacks remain valid for the workload.
+            let name = unsafe { $crate::internals::str_from_c(raw_name) };
+            let context = unsafe { $crate::WorkloadContext::new(raw_context) };
             $crate::WrappedWorkload::new(<$name as $crate::SingleRustWorkload>::new(name, context))
         }
         #[no_mangle]
