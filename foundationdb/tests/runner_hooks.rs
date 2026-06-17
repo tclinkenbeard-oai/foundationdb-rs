@@ -13,11 +13,45 @@ mod common;
 fn test_runner_hooks() {
     let _guard = unsafe { foundationdb::boot() };
     futures::executor::block_on(test_happy_path_instrumented()).expect("failed to run");
+    futures::executor::block_on(test_custom_completion_hook()).expect("failed to run");
     // ReportConflictingKeys (option 712) requires FDB >= 6.3
     if_cfg_api_versions!(min = 630 => {
         futures::executor::block_on(test_conflict_reports_in_metrics()).expect("failed to run");
         futures::executor::block_on(test_conflict_keys_direct_api()).expect("failed to run");
     });
+}
+
+#[derive(Default)]
+struct CompletionHooks {
+    completions: AtomicU64,
+}
+
+impl RunnerHooks for CompletionHooks {
+    fn on_complete(&self) {
+        self.completions.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+async fn test_custom_completion_hook() -> Result<(), FdbBindingError> {
+    let db = common::database().await?;
+
+    let success_hooks = CompletionHooks::default();
+    db.run_with_hooks(&success_hooks, |_trx, _| async move { Ok(()) })
+        .await?;
+    assert_eq!(success_hooks.completions.load(Ordering::SeqCst), 1);
+
+    let failure_hooks = CompletionHooks::default();
+    let result: Result<(), FdbBindingError> = db
+        .run_with_hooks(&failure_hooks, |_trx, _| async move {
+            Err(FdbBindingError::new_custom_error(Box::new(
+                std::io::Error::other("expected test failure"),
+            )))
+        })
+        .await;
+    assert!(result.is_err());
+    assert_eq!(failure_hooks.completions.load(Ordering::SeqCst), 1);
+
+    Ok(())
 }
 
 /// Happy path: instrumented_run completes with metrics, no conflicts.

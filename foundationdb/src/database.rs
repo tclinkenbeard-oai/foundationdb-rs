@@ -158,7 +158,7 @@ where
     #[cfg(feature = "trace")]
     let mut iteration: u64 = 0;
 
-    loop {
+    let result = loop {
         #[cfg(feature = "trace")]
         {
             iteration += 1;
@@ -187,14 +187,14 @@ where
                         continue;
                     }
                     Ok(Err(non_retryable)) => {
-                        return Err(FdbBindingError::from(non_retryable));
+                        break Err(FdbBindingError::from(non_retryable));
                     }
                     Err(binding_err) => {
-                        return Err(binding_err);
+                        break Err(binding_err);
                     }
                 }
             }
-            return Err(e);
+            break Err(e);
         }
 
         #[cfg(feature = "trace")]
@@ -211,7 +211,7 @@ where
                     iteration,
                     "transaction reference kept, aborting transaction"
                 );
-                return Err(err);
+                break Err(err);
             }
             Ok(Ok(committed)) => {
                 hooks.on_commit_success(&committed, commit_duration);
@@ -219,7 +219,7 @@ where
                 #[cfg(feature = "trace")]
                 tracing::info!(iteration, "success, returning result");
 
-                return result_closure;
+                break result_closure;
             }
             Ok(Err(commit_error)) => {
                 #[cfg(feature = "trace")]
@@ -254,12 +254,15 @@ where
                             );
                         }
 
-                        return Err(FdbBindingError::from(non_retryable));
+                        break Err(FdbBindingError::from(non_retryable));
                     }
                 }
             }
         }
-    }
+    };
+
+    hooks.on_complete();
+    result
 }
 
 /// Represents a FoundationDB database
@@ -656,7 +659,13 @@ impl Database {
         F: Fn(RetryableTransaction, MaybeCommitted) -> Fut,
         Fut: Future<Output = Result<T, FdbBindingError>>,
     {
-        let transaction = self.create_retryable_trx()?;
+        let transaction = match self.create_retryable_trx() {
+            Ok(transaction) => transaction,
+            Err(err) => {
+                hooks.on_complete();
+                return Err(err.into());
+            }
+        };
         run_with_hooks(transaction, hooks, closure).await
     }
 
@@ -711,14 +720,8 @@ impl Database {
         };
 
         match run_with_hooks(transaction, &hooks, closure).await {
-            Ok(val) => {
-                hooks.on_complete();
-                Ok((val, metrics.get_metrics_data()))
-            }
-            Err(err) => {
-                hooks.on_complete();
-                Err((err, metrics.get_metrics_data()))
-            }
+            Ok(val) => Ok((val, metrics.get_metrics_data())),
+            Err(err) => Err((err, metrics.get_metrics_data())),
         }
     }
 
