@@ -10,7 +10,7 @@ mod common;
 #[cfg(feature = "recipes-leader-election")]
 mod leader_election_tests {
     use foundationdb::{
-        recipes::leader_election::{ElectionConfig, LeaderElection},
+        recipes::leader_election::{ElectionConfig, LeaderElection, LeaderElectionError},
         tuple::Subspace,
         Database, FdbBindingError,
     };
@@ -264,6 +264,21 @@ mod leader_election_tests {
             .await?;
         assert!(still_leader, "Leader should still be able to refresh");
 
+        // A process cannot revive its own lease after it has expired.
+        let election_ref = &election;
+        let refreshed_after_expiry = db
+            .run(|txn, _| async move {
+                let result = election_ref
+                    .refresh_lease(&txn, leader_id, current_time() + Duration::from_secs(10))
+                    .await?;
+                Ok(result.is_some())
+            })
+            .await?;
+        assert!(
+            !refreshed_after_expiry,
+            "Leader should not be able to refresh an expired lease"
+        );
+
         Ok(())
     }
 
@@ -457,6 +472,47 @@ mod leader_election_tests {
             Ok(())
         })
         .await?;
+
+        let election_ref = &election;
+        db.run(|txn, _| async move {
+            election_ref
+                .try_claim_leadership(&txn, "test-process", 0, current_time())
+                .await?;
+            Ok(())
+        })
+        .await?;
+
+        let disabled_config = ElectionConfig {
+            election_enabled: false,
+            ..ElectionConfig::default()
+        };
+        let election_ref = &election;
+        db.run(|txn, _| {
+            let config = disabled_config.clone();
+            async move {
+                election_ref.write_config(&txn, &config).await?;
+                Ok(())
+            }
+        })
+        .await?;
+
+        let election_ref = &election;
+        let refresh_was_disabled = db
+            .run(|txn, _| async move {
+                match election_ref
+                    .refresh_lease(&txn, "test-process", current_time())
+                    .await
+                {
+                    Err(LeaderElectionError::ElectionDisabled) => Ok(true),
+                    Err(err) => Err(err.into()),
+                    Ok(_) => Ok(false),
+                }
+            })
+            .await?;
+        assert!(
+            refresh_was_disabled,
+            "Lease refresh should fail when elections are disabled"
+        );
 
         Ok(())
     }

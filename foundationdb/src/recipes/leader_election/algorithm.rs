@@ -291,6 +291,7 @@ where
 /// # Returns
 /// * `Ok(Some(state))` - Lease refreshed successfully
 /// * `Ok(None)` - No longer the leader
+/// * `Err(ElectionDisabled)` - Elections are administratively disabled
 pub async fn refresh_lease<T>(
     txn: &T,
     subspace: &Subspace,
@@ -301,12 +302,16 @@ where
     T: Deref<Target = Transaction>,
 {
     let config = read_config(txn, subspace).await?;
+    if !config.election_enabled {
+        return Err(LeaderElectionError::ElectionDisabled);
+    }
+
     let key = leader_key(subspace);
 
     let current = read_leader_state(txn, &key).await?;
 
     match current {
-        Some(leader) if leader.leader_id == process_id => {
+        Some(leader) if leader.leader_id == process_id && leader.is_lease_valid(current_time) => {
             // Still leader - refresh with incremented ballot
             let new_state = LeaderState {
                 ballot: leader.ballot + 1,

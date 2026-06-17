@@ -404,6 +404,7 @@ impl LeaderElection {
     /// # Returns
     /// * `Ok(Some(state))` - Lease refreshed
     /// * `Ok(None)` - No longer the leader
+    /// * `Err(ElectionDisabled)` - Elections are administratively disabled
     pub async fn refresh_lease<T>(
         &self,
         txn: &T,
