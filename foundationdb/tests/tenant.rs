@@ -20,17 +20,22 @@ fn test_tenant() {
 async fn test_tenant_management() -> foundationdb::FdbResult<()> {
     use foundationdb::tenant::TenantManagement;
 
-    let tenant = format!(
+    let tenant_prefix = format!(
         "tenant-{:?}",
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_millis()
     );
+    let tenant = format!("{tenant_prefix}-a");
+    let end_tenant = format!("{tenant_prefix}-b");
     let db = common::database().await?;
     TenantManagement::create_tenant(&db, tenant.as_bytes())
         .await
         .expect("could not create tenant");
+    TenantManagement::create_tenant(&db, end_tenant.as_bytes())
+        .await
+        .expect("could not create end tenant");
 
     let tenant_info = TenantManagement::get_tenant(&db, tenant.as_bytes())
         .await
@@ -46,6 +51,19 @@ async fn test_tenant_management() -> foundationdb::FdbResult<()> {
         "tenant name are not equals"
     );
 
+    let bounded_tenants =
+        TenantManagement::list_tenant(&db, tenant.as_bytes(), end_tenant.as_bytes(), None).await?;
+    assert_eq!(bounded_tenants.len(), 1, "range should contain one tenant");
+    let bounded_tenant = bounded_tenants
+        .into_iter()
+        .next()
+        .expect("range should contain its inclusive begin")
+        .expect("tenant could not be deserialized");
+    assert_eq!(
+        bounded_tenant.id, tenant_info.id,
+        "tenant range should include begin and exclude end"
+    );
+
     let tenants = TenantManagement::list_tenant(&db, "a".as_bytes(), "z".as_bytes(), None).await?;
     let tenants_size = tenants.len();
     assert!(!tenants.is_empty(), "received an empty list of tenants");
@@ -53,11 +71,14 @@ async fn test_tenant_management() -> foundationdb::FdbResult<()> {
     TenantManagement::delete_tenant(&db, tenant.as_bytes())
         .await
         .expect("could not delete tenant");
+    TenantManagement::delete_tenant(&db, end_tenant.as_bytes())
+        .await
+        .expect("could not delete end tenant");
 
     let tenants = TenantManagement::list_tenant(&db, "a".as_bytes(), "z".as_bytes(), None).await?;
     assert_eq!(
         tenants.len(),
-        tenants_size - 1,
+        tenants_size - 2,
         "received a bad list of tenants"
     );
     Ok(())

@@ -385,8 +385,8 @@ impl TenantManagement {
         };
 
         let range_option = RangeOption {
-            begin: KeySelector::first_greater_than(begin_range),
-            end: KeySelector::first_greater_than(end_range),
+            begin: KeySelector::first_greater_or_equal(begin_range),
+            end: KeySelector::first_greater_or_equal(end_range),
             limit,
             ..Default::default()
         };
