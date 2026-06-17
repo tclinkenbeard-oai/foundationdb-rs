@@ -12,9 +12,8 @@
 //!
 //! [source](https://forums.foundationdb.org/t/versionstamp-as-absolute-time/2442/3)
 
-use crate::future::FdbValue;
 use crate::options::TransactionOption;
-use crate::{FdbBindingError, FdbResult, KeySelector, RangeOption, Transaction};
+use crate::{FdbBindingError, KeySelector, RangeOption, Transaction};
 use foundationdb_tuple::{pack, unpack};
 use futures::StreamExt;
 
@@ -86,14 +85,14 @@ pub async fn hint_version_from_timestamp(
     range.limit = Some(1);
 
     // We get the first key matching our start range bound
-    let results = trx
+    let result = trx
         .get_ranges_keyvalues(range, snapshot)
-        .take(1)
-        .collect::<Vec<FdbResult<FdbValue>>>()
-        .await;
+        .next()
+        .await
+        .transpose()?;
 
     // If any result then the value found will be the read version ID
-    if let Some(Ok(kv)) = results.first() {
+    if let Some(kv) = result {
         let version = unpack(kv.value()).map_err(FdbBindingError::PackError)?;
         return Ok(Some(version));
     }
